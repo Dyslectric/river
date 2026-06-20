@@ -4,6 +4,8 @@ import { cancel, DOM, delay, pointer_event } from "./dom.mjs";
 import { Colour, Dimensions, Enum, Offset, Point, Position, clamp, deg_to_rad, mod, rad_to_deg, url_parameters } from "./ds.mjs";
 import { Parser } from "./parser.mjs";
 import { Quiver, QuiverImportExport } from "./quiver.mjs";
+import { setupTheme, themeColour } from "./theme.mjs";
+import { installThemeSelector } from "./theme_selector.mjs";
 
 /// Various parameters.
 Object.assign(CONSTANTS, {
@@ -3112,7 +3114,16 @@ class UI {
         // The (average) length of the dashes making up the cell border lines.
         const DASH_LENGTH = this.default_cell_size / 16;
         // The border colour.
-        const BORDER_COLOUR = "lightgrey";
+        const BORDER_COLOUR = (() => {
+            try {
+                if (typeof getComputedStyle === "function" && typeof document !== "undefined") {
+                    const v = getComputedStyle(document.documentElement)
+                        .getPropertyValue("--grid-line").trim();
+                    if (v) return v;
+                }
+            } catch (_) { /* fall through */ }
+            return "lightgrey";
+        })();
 
         const [width, height] = [document.body.offsetWidth, document.body.offsetHeight];
         const canvas = this.grid;
@@ -3173,7 +3184,11 @@ class UI {
         // All arrow styles support labels, shifting, and colour.
         style.label_position = options.label_position / 100;
         style.shift = options.offset * CONSTANTS.EDGE_OFFSET_DISTANCE;
-        style.colour = options.colour.css();
+        // Default (black) edges follow the theme's --ink so arrows are visible on dark
+        // canvases. A user-chosen colour (is_not_black) is always honoured as-is.
+        style.colour = options.colour.is_not_black()
+            ? options.colour.css()
+            : themeColour("--ink", options.colour.css());
 
         switch (options.style.name) {
             case "arrow":
@@ -8212,10 +8227,31 @@ document.addEventListener("DOMContentLoaded", () => {
         window.history.scrollRestoration = "manual";
     }
 
+    // Apply the persisted/OS theme BEFORE the UI initialises, so the very first grid
+    // draw and arrow render read the correct (e.g. dark) tokens instead of flashing the
+    // default light theme on refresh.
+    setupTheme();
+
     // The global UI.
     const body = new DOM.Element(document.body);
     const ui = new UI(body);
     ui.initialise();
+
+    // Mount the top-right theme selector, and re-render the diagram + grid when the theme
+    // changes (arrow/grid colours are painted at draw time).
+    installThemeSelector(document.body);
+    window.addEventListener("quiver-theme-change", () => {
+        try {
+            // Re-render cells and arrows. Default-coloured arrows derive their colour from
+            // the live --ink token inside `arrow_style_for_options`, so a plain rerender
+            // is enough to recolour them; user-chosen edge colours are preserved.
+            ui.quiver.rerender(ui);
+            // The grid is drawn on a <canvas> and is NOT CSS-driven, so redraw it
+            // explicitly — otherwise the new --grid-line colour only appears after the
+            // next pan/zoom that happens to call update_grid().
+            if (typeof ui.update_grid === "function") ui.update_grid();
+        } catch (_) { /* best-effort; theming UI still switches even if redraw is partial */ }
+    });
 
     const load_quiver_from_query_string = () => {
         const query_data = url_parameters();

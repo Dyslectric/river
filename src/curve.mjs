@@ -62,18 +62,28 @@ export class Curve {
     }
 }
 
-/// A flat symmetric quadratic Bézier curve.
+/// A flat quadratic Bézier curve. With `skew` = 0 (the default) it is symmetric, exactly
+/// as before. Non-zero `skew` in [-1, 1] slides the control point's x-position along the
+/// chord, producing asymmetric bends (the apex leans toward one endpoint).
 export class Bezier extends Curve {
-    constructor(origin, w, h, angle) {
+    constructor(origin, w, h, angle, skew = 0) {
         super();
         this.origin = origin;
         [this.w, this.h] = [w, h];
         this.angle = angle;
+        this.skew = Math.max(-1, Math.min(1, skew || 0));
 
         // Computed properties.
         this.end = this.origin.add(new Point(this.w, 0));
-        // The control point.
-        this.control = this.origin.add(new Point(this.w / 2, this.h));
+        // The control point. skew = 0 -> midpoint (w/2), the original symmetric curve.
+        // skew = ±1 maps the control x to 0.12w / 0.88w, kept off the endpoints to avoid
+        // degenerate cusps. point()/tangent()/delineate() are control-position agnostic,
+        // so they continue to work unchanged for any skew.
+        const MIN_FRAC = 0.12;
+        const frac = 0.5 + this.skew * (0.5 - MIN_FRAC);
+        this.control = this.origin.add(new Point(this.w * frac, this.h));
+        // Fast-path flag: the analytic intersection below assumes a centred apex.
+        this.is_symmetric = Math.abs(this.skew) <= EPSILON;
     }
 
     /// Returns the (x, y)-point at t = `t`. This does not take `angle` into account.
@@ -180,6 +190,13 @@ export class Bezier extends Curve {
     /// entirely contains the Bézier curve, and `permit_containment` is true, a single intersection
     /// point (the centre of the rectangle) is returned; otherwise, an error is thrown.
     intersections_with_rounded_rectangle(rect, permit_containment) {
+        // The analytic normalisation below assumes a symmetric (centred-apex) curve. For
+        // skewed curves, fall back to a numeric polyline intersection that makes no such
+        // assumption. Symmetric curves (the overwhelming common case) keep the exact,
+        // fast analytic path unchanged.
+        if (!this.is_symmetric) {
+            return this._numeric_intersections_with_rounded_rectangle(rect, permit_containment);
+        }
         // There is one edge case in the following computations, which occurs when the height of the
         // Bézier curve is zero (i.e. the curve is a straight line). We special-case this type of
         // curve, and do not normalise its height.
@@ -287,9 +304,57 @@ export class Bezier extends Curve {
         });
     }
 
-    /// Render the Bézier curve to an SVG path.
+    /// Numeric intersection used for skewed (asymmetric) curves, where the analytic
+    /// normalisation does not apply. Walks the delineated polyline and intersects each
+    /// segment with the rectangle's (polygon-approximated) edges. Precision follows
+    /// delineate()'s subdivision. Returns the same CurvePoint[] shape as the analytic path.
+    _numeric_intersections_with_rounded_rectangle(rect, permit_containment) {
+        const { points } = this.delineate(1); // [[t, Point(local, unrotated)], ...]
+        // delineate() works in the curve's local (unrotated) frame, so map the rect into
+        // that frame too: translate by -origin then rotate by -angle.
+        const poly = rect.points().map((p) => p.sub(this.origin).rotate(-this.angle));
+        const found = [];
+
+        const seg_intersect = (p1, p2, q1, q2) => {
+            const r = p2.sub(p1), s = q2.sub(q1);
+            const denom = r.x * s.y - r.y * s.x;
+            if (Math.abs(denom) < EPSILON) return null;
+            const qp = q1.sub(p1);
+            const u = (qp.x * r.y - qp.y * r.x) / denom;
+            const tt = (qp.x * s.y - qp.y * s.x) / denom;
+            if (u < -EPSILON || u > 1 + EPSILON || tt < -EPSILON || tt > 1 + EPSILON) return null;
+            return { pt: p1.add(r.mul(tt)), u };
+        };
+
+        for (let i = 0; i < points.length - 1; ++i) {
+            const [t0, a] = points[i];
+            const [t1, b] = points[i + 1];
+            for (let j = 0; j < poly.length; ++j) {
+                const c = poly[j], d = poly[(j + 1) % poly.length];
+                const hit = seg_intersect(a, b, c, d);
+                if (hit) {
+                    const t = t0 + (t1 - t0) * hit.u;
+                    // Rotate the local hit point back into world space for the CurvePoint.
+                    const world = hit.pt.rotate(this.angle).add(this.origin);
+                    found.push(new CurvePoint(world, t, this.tangent(t) + this.angle));
+                }
+            }
+        }
+
+        if (found.length === 0) {
+            return Curve.check_for_containment(this.origin, rect, permit_containment);
+        }
+        const uniq = [];
+        for (const f of found) {
+            if (!uniq.some((g) => g.sub(f).length() < EPSILON * 10)) uniq.push(f);
+        }
+        return uniq;
+    }
+
+    /// Render the Bézier curve to an SVG path. Uses the (possibly skewed) control point,
+    /// so asymmetric curves render correctly; for skew = 0 this is the original midpoint.
     render(path) {
-        return path.curve_by(new Point(this.w / 2, this.h), new Point(this.w, 0));
+        return path.curve_by(new Point(this.control.x - this.origin.x, this.h), new Point(this.w, 0));
     }
 }
 

@@ -33,7 +33,7 @@ body {
     margin: 0;
     overflow: hidden;
 
-    background: white;
+    background: var(--paper, white);
 
     font-family: Arial, sans-serif;
 
@@ -440,6 +440,11 @@ being. */
     font-size: 26px;
     white-space: nowrap;
 
+    /* Default diagram text colour follows the theme. User-chosen label colours are
+       written as an inline style (only when non-black), which overrides this. */
+    color: var(--ink, black);
+    fill: var(--ink, black);
+
     pointer-events: none;
     user-select: none;
 }
@@ -496,6 +501,11 @@ being. */
     background: var(--ui-black);
     border-radius: 8px 8px 0 0;
 
+    /* The global bar is a dark chip surface (like the toolbar), so its text uses the
+       fixed-role chip text colour rather than inheriting --ui-text (which is canvas ink
+       and would mis-contrast against the chip on light themes). */
+    color: var(--ui-chip-text, hsl(0, 0%, 90%));
+
     text-align: center;
     white-space: nowrap;
 }
@@ -507,6 +517,7 @@ being. */
     padding: 8px 16px;
 
     background: var(--ui-black);
+    color: var(--ui-chip-text, hsl(0, 0%, 90%));
     border-radius: 16px;
 }
 
@@ -1319,7 +1330,7 @@ user has already pressed semicolon, placing us in command mode. */
 }
 
 .toolbar .action:disabled .name, .toolbar .action:disabled .shortcut {
-    color: hsl(0, 0%, 64%);
+    color: var(--ui-chip-text-faded, hsl(0, 0%, 72%));
 }
 
 .toolbar .action.dropdown > .shortcut:empty::before {
@@ -1366,7 +1377,7 @@ button.flash {
 
     font-size: 9.5px;
     line-height: 9.5px;
-    color: hsl(0, 0%, 80%);
+    color: var(--ui-chip-text, hsl(0, 0%, 90%));
 }
 
 .toolbar .action .name {

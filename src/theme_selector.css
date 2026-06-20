@@ -1,0 +1,93 @@
+/* src/theme_selector.css
+ * Styling for the top-right theme selector. Everything colour-related is driven by the
+ * CSS tokens from theme.mjs, so the selector reskins along with the rest of the UI.
+ * Add this to quiver via index.html or @import from main.css. */
+
+.theme-selector {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 1000;
+    font: inherit;
+}
+
+.theme-selector__button {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    border: 1px solid var(--ui-border);
+    background: var(--ui-panel);
+    color: var(--ink);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.theme-selector__button:hover {
+    background: var(--ui-panel-2);
+}
+
+.theme-selector__button:focus-visible {
+    outline: 2px solid var(--ui-focus);
+    outline-offset: 2px;
+}
+
+.theme-selector.is-open .theme-selector__button {
+    border-color: var(--ui-focus);
+}
+
+.theme-selector__menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    min-width: 180px;
+    background: var(--ui-panel);
+    border: 1px solid var(--ui-border);
+    border-radius: 10px;
+    box-shadow: 0 6px 24px hsla(0, 0%, 0%, 0.25);
+}
+
+.theme-selector__menu[hidden] {
+    display: none;
+}
+
+.theme-selector__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+}
+
+.theme-selector__item:hover {
+    background: var(--ui-hover);
+}
+
+/* Checkmark for the active theme, drawn with a pseudo-element so no extra markup. */
+.theme-selector__item::before {
+    content: "";
+    width: 14px;
+    display: inline-block;
+    text-align: center;
+    opacity: 0;
+}
+
+.theme-selector__item.is-active::before {
+    content: "✓";
+    opacity: 1;
+    color: var(--ui-focus);
+}

@@ -154,7 +154,19 @@ export class ArrowStyle {
         this.heads = CONSTANTS.ARROW_HEAD_STYLE.NORMAL;
         this.tails = CONSTANTS.ARROW_HEAD_STYLE.NONE;
         // The colour of the arrow.
-        this.colour = "black";
+        // The colour of the arrow. Defaults to the themable "--ink" token so arrows are
+        // visible on dark canvases; falls back to black in headless/export contexts where
+        // no CSS layer is present. User-set per-edge colours still override this.
+        this.colour = (() => {
+            try {
+                if (typeof getComputedStyle === "function" && typeof document !== "undefined") {
+                    const v = getComputedStyle(document.documentElement)
+                        .getPropertyValue("--ink").trim();
+                    if (v) return v;
+                }
+            } catch (_) { /* fall through */ }
+            return "black";
+        })();
     }
 }
 
@@ -249,7 +261,7 @@ export class Arrow {
         const length = this.length();
         switch (this.style.shape) {
             case CONSTANTS.ARROW_SHAPE.BEZIER:
-                return new Bezier(origin, length, this.style.curve, angle);
+                return new Bezier(origin, length, this.style.curve, angle, this.style.skew || 0);
             case CONSTANTS.ARROW_SHAPE.ARC:
                 if (this.source === this.target) {
                     return new Arc(origin, length, true, this.style.curve, angle);
