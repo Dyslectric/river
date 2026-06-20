@@ -533,12 +533,16 @@ UIMode.PointerMove = class extends UIMode {
     }
 
     release(ui) {
-        // Make sure we're not trying to release any cells on top of existing ones.
+        // Make sure we're not trying to release any cells on top of OTHER existing ones.
+        // The moving cells are excluded from the check: they are still present in the
+        // identity index at their new positions, so a naive spatial query would detect
+        // them as colliding with themselves and throw — which previously left the move
+        // stuck (the pointer-up never completed). We pass `this.selection` to exclude.
         for (const cell of this.selection) {
-            if (ui.positions.has(`${cell.position}`)) {
+            const blocker = ui.vertex_near(cell.position, 0.5, this.selection);
+            if (blocker !== null) {
                 throw new Error(
-                    "new cell position already contains a cell:",
-                    ui.positions.get(`${cell.position}`),
+                    "new cell position already contains a cell:", blocker,
                 );
             }
         }
@@ -675,6 +679,11 @@ class UI {
         // implies that only one vertex may occupy each position.
         this.positions = new Map();
 
+        // A map from stable cell id -> cell. Identity index, independent of position.
+        // Kept in sync with `this.positions` during Stage A; it becomes the primary
+        // identity source once free positioning lands.
+        this.cells_by_id = new Map();
+
         // A set of unique idenitifiers for various objects (used for generating HTML `id`s).
         this.ids = new Map();
 
@@ -753,6 +762,7 @@ class UI {
         this.cell_height_constraints = new Map();
         this.selection = new Set();
         this.positions = new Map();
+        this.cells_by_id = new Map();
         this.update_grid();
 
         // Clear the undo/redo history.
@@ -1408,9 +1418,9 @@ class UI {
                 if (this.in_mode(UIMode.Default)) {
                     if (event.altKey) {
                         this.switch_mode(new UIMode.Pan("Alt"));
-                    } else if (event.ctrlKey) {
-                        this.switch_mode(new UIMode.Pan("Control"));
                     } else {
+                        // Note: Ctrl no longer pans — it is the vertex-move modifier
+                        // (Ctrl+drag = move, Ctrl+Alt+drag = free move). Alt alone still pans.
                         this.dismiss_pane();
 
                         if (this.focus_point.class_list.contains("focused")) {
@@ -1664,14 +1674,19 @@ class UI {
 
                 const new_position = (cell) => cell.position.add(position).sub(this.mode.previous);
 
-                // We will only try to reposition if the new position is actually different
-                // (rather than the cursor simply having moved within the same grid cell).
-                // On top of this, we prevent vertices from being moved into grid cells that
-                // are already occupied by vertices.
+                // We prevent vertices from being moved on top of other vertices. The cells
+                // being moved are excluded so they don't collide with themselves (essential
+                // in free mode, where positions are continuous and self-overlap is likely).
+                // A tight radius is used so free placement near (but not on top of) a
+                // neighbour isn't over-eagerly blocked.
                 const occupied = Array.from(this.mode.selection).some((cell) => {
-                    return cell.is_vertex() && this.positions.has(`${new_position(cell)}`);
+                    return cell.is_vertex()
+                        && this.vertex_near(new_position(cell), 0.25, this.mode.selection) !== null;
                 });
 
+                // `position` is already snapped (integer) or free (fractional) per the Alt
+                // modifier, so a plain inequality reposition-guards correctly in both modes:
+                // snap mode only differs on cell change; free mode differs on any sub-cell move.
                 if (!position.eq(this.mode.previous) && !occupied) {
                     // We'll need to move all of the edges connected to the moved vertices,
                     // so we keep track of the root vertices in `moved.`
@@ -1731,7 +1746,7 @@ class UI {
                 // We only permit the forgery of vertices, not edges.
                 if (this.mode.source.is_vertex() && this.mode.target === null) {
                     this.focus_point.class_list
-                        .toggle("revealed", !this.positions.has(`${position}`));
+                        .toggle("revealed", !this.has_vertex_at(position));
                 }
 
                 // Update the position of the cursor.
@@ -2078,10 +2093,11 @@ class UI {
             }
         });
 
-        // Holding Option or Control triggers panning mode (and releasing ends panning mode).
+        // Holding Option (Alt) triggers panning mode (and releasing ends panning mode).
+        // Control is intentionally NOT a pan modifier: it is reserved for vertex moving
+        // (Ctrl+drag = move, Ctrl+Alt+drag = free move).
         this.shortcuts.add([
             { key: "Alt", context: Shortcuts.SHORTCUT_PRIORITY.Always },
-            { key: "Control", context: Shortcuts.SHORTCUT_PRIORITY.Always },
         ], (event) => {
             if (this.in_mode(UIMode.Default)) {
                 this.switch_mode(new UIMode.Pan(event.key));
@@ -2132,7 +2148,7 @@ class UI {
                 if (this.focus_point.class_list.contains("focused")) {
                     const selected = Array.from(this.codes)
                         .filter(([, cell]) => cell.is_vertex() && this.selection.has(cell));
-                    if (!this.positions.has(`${this.focus_position}`)) {
+                    if (!this.has_vertex_at(this.focus_position)) {
                         const target = create_vertex_at_focus_point(event);
                         // Connect any selected vertices to the target.
                         const edges = selected.map(([, source]) => {
@@ -2148,7 +2164,7 @@ class UI {
                             actions,
                         );
                     } else {
-                        const target = this.positions.get(`${this.focus_position}`);
+                        const target = this.vertex_at(this.focus_position);
                         selected.forEach(([, source]) => {
                             // The `target` vertex already exists, so it may already be selected.
                             // In this case, we do not want to try to connect it to itself.
@@ -2328,9 +2344,9 @@ class UI {
                             this.positions.delete(`${vertex.position}`);
                         }
                         const all_new_positions_free = vertices.every((vertex) => {
-                            return !this.positions.has(`${
+                            return !this.has_vertex_at(
                                 vertex.position.add(position_delta.mul(distance))
-                            }`);
+                            );
                         });
                         for (const vertex of vertices) {
                             this.positions.set(`${vertex.position}`, vertex);
@@ -2490,14 +2506,33 @@ class UI {
 
     /// Convert an `Offset` (pixels) to a `Position` (cell indices).
     /// The inverse function is `offset_from_position`.
-    position_from_offset(offset) {
+    /// When `snap` is true (the default), the position is rounded to the nearest cell, as
+    /// in stock quiver. When false (free placement), the fractional sub-cell position is
+    /// returned, computed from each axis's [index, remainder-into-cell] pair so the vertex
+    /// can sit anywhere between grid lines.
+    position_from_offset(offset, snap = true) {
         const [col, row] = this.col_row_from_offset(offset);
-        return new Position(col, row);
+        if (snap) {
+            return new Position(col, row);
+        }
+        // Free placement: compute how far the pointer is *into* the cell [col, row].
+        // `col_row_from_offset` gives the integer cell. The cell's starting pixel is
+        // `offset_from_position` of that integer cell; the leftover, divided by the cell's
+        // size, is the fraction (0..1) through the cell. (The remainder returned by
+        // `cell_from_offset` is an absolute cumulative offset, not the in-cell distance,
+        // so we must not use it directly.)
+        const cell_origin = this.offset_from_position(new Position(col, row));
+        const col_size = this.cell_size(this.cell_width, col);
+        const row_size = this.cell_size(this.cell_height, row);
+        const col_frac = (offset.x - cell_origin.x) / col_size;
+        const row_frac = (offset.y - cell_origin.y) / row_size;
+        return new Position(col + col_frac, row + row_frac);
     }
 
-    /// A helper method for getting a position from an event.
-    position_from_event(event) {
-        return this.position_from_offset(this.offset_from_event(event));
+    /// A helper method for getting a position from an event. Holding Alt/Option disables
+    /// snapping for free placement (live, while the modifier is held).
+    position_from_event(event, snap = !event.altKey) {
+        return this.position_from_offset(this.offset_from_event(event), snap);
     }
 
     /// A helper method for getting an offset from an event.
@@ -2604,13 +2639,13 @@ class UI {
             const delta_x = delta(
                 this.cell_width_constraints,
                 this.cell_width,
-                position.x,
+                this.grid_key(position.x),
                 MARGIN_X,
             );
             const delta_y = delta(
                 this.cell_height_constraints,
                 this.cell_height,
-                position.y,
+                this.grid_key(position.y),
                 MARGIN_Y,
             );
 
@@ -2655,8 +2690,8 @@ class UI {
             constraints.get(offset).set(cell, size);
         };
 
-        update_size(this.cell_width_constraints, cell.position.x, width);
-        update_size(this.cell_height_constraints, cell.position.y, height);
+        update_size(this.cell_width_constraints, this.grid_key(cell.position.x), width);
+        update_size(this.cell_height_constraints, this.grid_key(cell.position.y), height);
 
         // Resize the grid if need be.
         if (!this.buffer_updates) {
@@ -2686,16 +2721,59 @@ class UI {
         });
     };
 
+    /// Round a coordinate to its grid column/row index. Free (fractional) positions are
+    /// bucketed to the nearest integer line for the flexible grid's column/row sizing, so
+    /// a freely-placed vertex still contributes sensible grid-line spacing.
+    grid_key(coord) {
+        return Math.round(coord);
+    }
+
+    /// Returns the vertex occupying (or nearest within half a cell of) `position`, or null.
+    /// Now spatial (Stage C): with free positioning, vertices may sit at fractional
+    /// positions, so an exact-cell map lookup is insufficient. Snapped vertices land
+    /// exactly on integer positions, so this remains equivalent to the old lookup for them.
+    vertex_at(position) {
+        return this.vertex_near(position, 0.5);
+    }
+
+    /// Returns true if a vertex occupies (or is within half a cell of) `position`.
+    has_vertex_at(position) {
+        return this.vertex_at(position) !== null;
+    }
+
+    /// Returns the nearest vertex within `radius` (in grid units) of `position`, or null.
+    /// This is the free-positioning query used once snapping can be disabled. It scans
+    /// `cells_by_id` (small n for hand-drawn diagrams); a bucket index can replace the
+    /// linear scan later if needed. `exclude` is an optional Set of cells to ignore (e.g.
+    /// the vertices currently being dragged, so they don't collide with themselves).
+    vertex_near(position, radius = 0.5, exclude = null) {
+        let best = null;
+        let best_dist = radius;
+        for (const cell of this.cells_by_id.values()) {
+            if (!cell.is_vertex()) {
+                continue;
+            }
+            if (exclude !== null && exclude.has(cell)) {
+                continue;
+            }
+            const dx = cell.position.x - position.x;
+            const dy = cell.position.y - position.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= best_dist) {
+                best_dist = dist;
+                best = cell;
+            }
+        }
+        return best;
+    }
+
     /// Returns the cell under the focus point, if the focus point is active and such a cell exists.
     /// Otherwise, returns `null`.
     cell_under_focus_point() {
         if (!this.focus_point.class_list.contains("focused")) {
             return null;
         }
-        if (this.positions.has(`${this.focus_position}`)) {
-            return this.positions.get(`${this.focus_position}`);
-        }
-        return null;
+        return this.vertex_at(this.focus_position);
     }
 
     /// Updates the tooltip associated to the focus point.
@@ -2841,6 +2919,8 @@ class UI {
     /// Adds a cell to the canvas.
     add_cell(cell) {
         this.canvas.add(cell.element);
+        // Identity index tracks all cells (vertices and edges).
+        this.cells_by_id.set(cell.id, cell);
         if (cell.is_vertex()) {
             this.positions.set(`${cell.position}`, cell);
             cell.recalculate_size(this);
@@ -2853,10 +2933,12 @@ class UI {
         // Remove this cell and its dependents from the quiver and then from the HTML.
         const update_positions = new Set();
         for (const removed of this.quiver.remove(cell, when)) {
+            // Identity index tracks all cells.
+            this.cells_by_id.delete(removed.id);
             if (removed.is_vertex()) {
                 this.positions.delete(`${removed.position}`);
-                this.cell_width_constraints.get(cell.position.x).delete(cell);
-                this.cell_height_constraints.get(cell.position.y).delete(cell);
+                this.cell_width_constraints.get(this.grid_key(cell.position.x))?.delete(cell);
+                this.cell_height_constraints.get(this.grid_key(cell.position.y))?.delete(cell);
                 update_positions.add(removed.position);
             }
             this.deselect(removed);
@@ -7421,6 +7503,12 @@ ColourPicker.TARGET = new Enum(
 /// abstract properties of the cell as well as their HTML representation.
 class Cell {
     constructor(quiver, level, label = "", label_colour = Colour.black()) {
+        // A stable, unique identity for this cell, independent of its position. Used by
+        // `ui.cells_by_id` to decouple cell identity from grid coordinates (the
+        // prerequisite for free positioning). Unlike `code` (below), this never changes
+        // and is not user-facing.
+        this.id = Cell.NEXT_UID++;
+
         // The k for which this cell is an k-cell.
         this.level = level;
 
@@ -7464,32 +7552,8 @@ class Cell {
         // We allow vertices to be moved by dragging its `element` (which contains its
         // `content_element`, the element with the actual cell content).
         if (this.is_vertex()) {
-            this.element.listen(pointer_event("down"), (event) => {
-                if (event.button === 0) {
-                    if (ui.in_mode(UIMode.Default)) {
-                        event.stopPropagation();
-                        ui.dismiss_pane();
-                        ui.focus_point.class_list.remove(
-                            "revealed", "pending", "active", "focused", "smooth"
-                        );
-                        const vertices = Array.from(ui.selection).filter(
-                            (cell) => cell.is_vertex()
-                        );
-                        // If the cell we're dragging is part of the existing selection,
-                        // then we'll move every cell that is selected. However, if it's
-                        // not already part of the selection, we'll just drag this cell
-                        // and ignore the selection.
-                        const move = new Set(ui.selection.has(this) ? vertices : [this]);
-                        ui.switch_mode(
-                            new UIMode.PointerMove(
-                                ui,
-                                ui.position_from_event(event),
-                                move,
-                            ),
-                        );
-                    }
-                }
-            });
+            // (Vertex moving is handled in the `content_element` pointerdown below, gated
+            // on Ctrl, so that it can suppress the connect-arming that also lives there.)
         } else {
             // Vertices have custom handling for adding `kbd`, but it's more convenient to handle
             // edges here.
@@ -7515,6 +7579,27 @@ class Cell {
             ui.focus_point.class_list.remove("revealed");
 
             if (event.button === 0) {
+                // Ctrl + press on a vertex starts a MOVE (Ctrl+Alt = free move), rather
+                // than arming an arrow-drawing connection. We handle it here — where connect
+                // would otherwise arm via `.pending` — and return early so no connection or
+                // selection-toggle occurs. (Alt alone still pans; Ctrl no longer pans.)
+                if (event.ctrlKey && this.is_vertex()
+                    && (ui.in_mode(UIMode.Default) || ui.in_mode(UIMode.Command))) {
+                    event.stopImmediatePropagation();
+                    event.preventDefault();
+                    ui.dismiss_pane();
+                    ui.focus_point.class_list.remove(
+                        "revealed", "pending", "active", "focused", "smooth"
+                    );
+                    const vertices = Array.from(ui.selection).filter(
+                        (cell) => cell.is_vertex()
+                    );
+                    const move = new Set(ui.selection.has(this) ? vertices : [this]);
+                    ui.switch_mode(new UIMode.PointerMove(
+                        ui, ui.position_from_event(event), move,
+                    ));
+                    return;
+                }
                 if (ui.in_mode(UIMode.Default) || ui.in_mode(UIMode.Command)) {
                     event.stopPropagation();
                     event.preventDefault();
@@ -7734,6 +7819,9 @@ class Cell {
 
 // We use an ID system for cells, so that we have an identifier that the user can jump to.
 Cell.NEXT_ID = 0;
+// Monotonic counter for stable cell identities (see `this.id`). Separate from NEXT_ID,
+// which backs the user-facing keyboard `code`.
+Cell.NEXT_UID = 0;
 
 /// 0-cells, or vertices. This is primarily specialised in its set up of HTML elements.
 export class Vertex extends Cell {
@@ -7766,8 +7854,8 @@ export class Vertex extends Cell {
     /// Changes the vertex's position.
     /// This helper method ensures that column and row sizes are updated automatically.
     set_position(ui, position) {
-        ui.cell_width_constraints.get(this.position.x).delete(this);
-        ui.cell_height_constraints.get(this.position.y).delete(this);
+        ui.cell_width_constraints.get(ui.grid_key(this.position.x))?.delete(this);
+        ui.cell_height_constraints.get(ui.grid_key(this.position.y))?.delete(this);
         this.position = position;
         this.shape.origin = ui.centre_offset_from_position(this.position);
     }

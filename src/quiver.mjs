@@ -1526,7 +1526,7 @@ QuiverImportExport.base64 = new class extends QuiverImportExport {
                     assert_kind(label_colour, "colour");
 
                     const position = origin.add(new Position(x, y));
-                    if (ui.positions.has(`${position}`)) {
+                    if (ui.has_vertex_at(position)) {
                         // If we cannot place every cell, we would prefer to add no cells, so we
                         // must remove any we have added so far.
                         indices.forEach((cell) => ui.remove_cell(cell, ui.history.present));
