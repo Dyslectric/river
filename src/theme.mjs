@@ -22,7 +22,9 @@ export const PALETTES = {
         panel:      "hsl(0, 0%, 96%)",     // UI panel background
         panel_2:    "hsl(0, 0%, 90%)",     // secondary panel / buttons
         line:       "hsla(0, 0%, 0%, 0.2)",// borders, grid lines
-        accent:     "hsl(200, 100%, 50%)", // selection blue
+        accent:     "hsl(200, 100%, 45%)", // selection blue (slightly deeper)
+        accent_text: "hsl(200, 100%, 38%)", // accent as foreground text
+        on_accent:  "hsl(0, 0%, 100%)",     // text on the accent surface
         highlight:  "hsl(30, 100%, 50%)",  // highlight orange
         error:      "hsl(0, 50%, 50%)",
         warning:    "hsl(50, 100%, 70%)",
@@ -42,7 +44,9 @@ export const PALETTES = {
         panel:      "hsl(0, 0%, 15%)",
         panel_2:    "hsl(0, 0%, 22%)",
         line:       "hsla(0, 0%, 100%, 0.2)",
-        accent:     "hsl(200, 100%, 55%)",
+        accent:     "hsl(200, 90%, 60%)",
+        accent_text: "hsl(200, 90%, 70%)",
+        on_accent:  "hsl(0, 0%, 8%)",       // dark text on the bright accent
         highlight:  "hsl(30, 100%, 55%)",
         error:      "hsl(0, 55%, 55%)",
         warning:    "hsl(50, 100%, 70%)",
@@ -64,6 +68,9 @@ export const PALETTES = {
         panel_2:         "#ccd0da", // surface0
         line:            "hsla(231, 14%, 35%, 0.18)",
         accent:          "#1e66f5", // blue
+        accent_text:     "#1e66f5", // already deep enough for foreground
+        on_accent:       "#eff1f5", // base — light text on the deep blue
+        on_accent_faded: "hsla(0, 0%, 100%, 0.6)",
         highlight:       "#fe640b", // peach
         error:           "#d20f39", // red
         warning:         "#df8e1d", // yellow
@@ -80,6 +87,8 @@ export const PALETTES = {
         panel_2:         "#414559", // surface0
         line:            "hsla(227, 24%, 87%, 0.16)",
         accent:          "#8caaee", // blue
+        accent_text:     "#8caaee", // pastel reads as foreground on dark surfaces
+        on_accent:       "#232634", // crust — dark text on the pastel accent
         highlight:       "#ef9f76", // peach
         error:           "#e78284", // red
         warning:         "#e5c890", // yellow
@@ -96,6 +105,8 @@ export const PALETTES = {
         panel_2:         "#363a4f", // surface0
         line:            "hsla(228, 39%, 88%, 0.16)",
         accent:          "#8aadf4", // blue
+        accent_text:     "#8aadf4",
+        on_accent:       "#181926", // crust
         highlight:       "#f5a97f", // peach
         error:           "#ed8796", // red
         warning:         "#eed49f", // yellow
@@ -112,6 +123,8 @@ export const PALETTES = {
         panel_2:         "#313244", // surface0
         line:            "hsla(226, 64%, 88%, 0.18)",
         accent:          "#89b4fa", // blue
+        accent_text:     "#89b4fa",
+        on_accent:       "#11111b", // crust
         highlight:       "#fab387", // peach
         error:           "#f38ba8", // red
         warning:         "#f9e2af", // yellow
@@ -136,6 +149,9 @@ export function buildTheme(p) {
     return {
         // Foreground / background.
         "--ink": p.ink,                 // NEW: themable replacement for literal "black"
+        "--ink-faded": p.overlay_on_light // canvas hint/placeholder text (dim foreground)
+            ? "hsla(0, 0%, 0%, 0.4)"
+            : "hsla(0, 0%, 100%, 0.4)",
         "--paper": p.paper,             // NEW: canvas background (was transparent/white)
 
         // UI colours (names kept compatible with quiver's existing main.css).
@@ -146,6 +162,18 @@ export function buildTheme(p) {
         "--ui-black": p.chip,           // dark chip surface (toolbar background)
         "--ui-white": p.chip_text,      // light text on the chip
         "--ui-blue": p.accent,
+        // Text/glyph colour to sit ON the accent when accent is used as a BACKGROUND
+        // (selection chips, active toolbar, selected hints). Catppuccin accents are bright
+        // pastels, so light text on them is invisible — they need dark text. We use the
+        // theme's deepest surface (crust/paper) for guaranteed contrast.
+        "--ui-on-accent": p.on_accent,
+        // A dimmed version of on-accent for placeholder text inside a focused (accent-
+        // filled) input. on_accent is dark on the bright pastel accents, so this is a
+        // dark translucent by default; light themes with a deep accent can override.
+        "--ui-on-accent-faded": p.on_accent_faded || "hsla(0, 0%, 0%, 0.5)",
+        // A deeper accent for use as FOREGROUND text/borders on light surfaces, where the
+        // bright pastel accent would wash out. Falls back to the accent if unset.
+        "--ui-blue-text": p.accent_text || p.accent,
         "--ui-orange": p.highlight,
         "--ui-background": p.paper,     // was `transparent`; now explicit so dark works
         "--ui-border": p.line,

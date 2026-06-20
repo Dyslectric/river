@@ -102,7 +102,7 @@ noscript {
     outline: none;
 
     text-align: center;
-    color: white;
+    color: var(--ui-chip-text, white);
     font-size: 20px;
 }
 
@@ -159,7 +159,7 @@ a > .logo:hover {
     border-radius: 4px;
 
     text-align: center;
-    color: var(--ui-black);
+    color: var(--ui-on-accent);
 }
 
 .ui > .tooltip {
@@ -193,7 +193,7 @@ kbd {
     top: 0; bottom: 0;
     z-index: 400;
 
-    background: hsl(0, 0%, 10%);
+    background: var(--paper, hsl(0, 0%, 10%));
 }
 
 .loading-screen.hidden {
@@ -218,12 +218,12 @@ kbd {
     transform: translate(-50%, -50%);
     margin-left: 20px; margin-top: 32px;
 
-    color: var(--ui-blue);
+    color: var(--ui-blue-text);
     white-space: nowrap;
 }
 
 .embedded .loading-screen {
-    background: white;
+    background: var(--paper, white);
 }
 
 .embedded .loading-screen .logo {
@@ -281,7 +281,7 @@ kbd {
 
     text-align: center;
     font: 16px Arial, sans-serif;
-    color: hsla(0, 0%, 0%, 0.4);
+    color: var(--ink-faded, hsla(0, 0%, 0%, 0.4));
 }
 
 .focus-point.revealed {
@@ -596,13 +596,13 @@ label.inline {
 }
 
 .label-input:hover:not(:disabled):not(:focus) {
-    background: hsla(0, 0%, 15%, 0.9);
+    background: var(--ui-panel, hsla(0, 0%, 15%, 0.9));
 }
 
 .label-input:focus {
     background: var(--ui-focus);
 
-    color: black;
+    color: var(--ui-on-accent, black);
 }
 
 .input-mode {
@@ -634,7 +634,8 @@ label.inline {
 }
 
 .label-input::selection {
-    background-color: white;
+    background-color: var(--ink, black);
+    color: var(--paper, white);
 }
 
 .label-input-container .colour-indicator {
@@ -666,7 +667,7 @@ label.inline {
 
 .panel input[type="text"]::placeholder,
 .port .options input[type="number"]::placeholder {
-    color: hsla(0, 0%, 100%, 0.4);
+    color: var(--ui-chip-text-faded, hsla(0, 0%, 100%, 0.4));
 }
 
 .panel input[type="text"]:hover:not(:disabled):not(:focus),
@@ -679,12 +680,12 @@ label.inline {
     background: var(--ui-focus);
     border-color: var(--ui-focus);
 
-    color: hsl(0, 0%, 16%);
+    color: var(--ui-on-accent, hsl(0, 0%, 16%));
 }
 
 .panel input[type="text"]:focus::placeholder,
 .port .options input[type="number"]:focus::placeholder {
-    color: hsla(0, 0%, 0%, 0.4);
+    color: var(--ui-on-accent-faded, hsla(0, 0%, 0%, 0.4));
 }
 
 input[type="text"].flash {
@@ -884,7 +885,7 @@ div.slider {
     transform: translateX(-50%);
     z-index: 1;
 
-    background: hsl(0, 0%, 10%);
+    background: var(--ui-panel-2, hsl(0, 0%, 10%));
     border: var(--ui-border) solid 1px;
     border-radius: 20px;
 
@@ -911,13 +912,13 @@ div.slider {
 .slider.symmetric:not(.disabled):not(.focused):hover .thumb,
 .linked-sliders.linked:hover .thumb
 {
-    background: hsl(0, 0%, 20%);
+    background: var(--ui-panel-2, hsl(0, 0%, 20%));
 }
 
 .slider:not(.disabled):not(.focused) .thumb.active,
 .slider.symmetric:not(.disabled):not(.focused).active .thumb,
 .linked-sliders.linked.active .thumb {
-    background: hsl(0, 0%, 30%);
+    background: var(--ui-panel-2, hsl(0, 0%, 30%));
 }
 
 .slider .track {
@@ -1021,13 +1022,13 @@ kbd.hint.focused, kbd.hint .focused {
     background: var(--ui-white);
     border: var(--ui-blue) 1px solid;
 
-    color: var(--ui-blue);
+    color: var(--ui-blue-text);
 }
 
 .ui:not(.command).show-queue .cell.selected kbd.hint.queue {
     background: var(--ui-blue);
 
-    color: var(--ui-white);
+    color: var(--ui-on-accent);
 }
 
 .ui:not(.command):not(.show-queue):not(.show-hints) kbd.hint.queue {
@@ -1121,10 +1122,10 @@ user has already pressed semicolon, placing us in command mode. */
     margin-left: 8px;
     width: 18px; height: 18px;
 
-    background: hsl(0, 0%, 36%);
+    background: var(--ui-panel-2, hsl(0, 0%, 36%));
     border-radius: 100%;
 
-    color: hsl(0, 0%, 16%);
+    color: var(--ui-chip-text, hsl(0, 0%, 16%));
     text-align: center;
     line-height: 18px;
 
@@ -1308,7 +1309,7 @@ user has already pressed semicolon, placing us in command mode. */
 }
 
 .toolbar .action:hover {
-    background: hsl(0, 0%, 28%);
+    background: var(--ui-hover, hsl(0, 0%, 28%));
 }
 
 .toolbar .action:not(:disabled):not(.dropdown):active {
@@ -1450,11 +1451,11 @@ button.flash {
 }
 
 .pane kbd {
-    background: hsl(0, 0%, 0%, 0.9);
+    background: var(--ui-black, hsl(0, 0%, 0%, 0.9));
 }
 
 .port kbd {
-    background: hsl(0, 0%, 100%, 0.9);
+    background: var(--ui-white, hsl(0, 0%, 100%, 0.9));
 }
 
 .pane h2 {
@@ -1469,7 +1470,7 @@ button.flash {
 
     border-spacing: 0;
 
-    color: hsl(0, 0%, 76%);
+    color: var(--ui-chip-text-faded, hsl(0, 0%, 76%));
     white-space: pre-line;
 }
 
@@ -1499,7 +1500,7 @@ button.flash {
 }
 
 .pane p, .pane li {
-    color: hsl(0, 0%, 76%);
+    color: var(--ui-chip-text-faded, hsl(0, 0%, 76%));
 }
 
 .pane li {
@@ -1533,7 +1534,7 @@ button.flash {
     padding-bottom: calc(46px + 8px);
     overflow-y: auto;
 
-    background: hsla(0, 0%, 10%, 0.8);
+    background: var(--ui-black, hsla(0, 0%, 10%, 0.8));
 
     backdrop-filter: blur(4px);
 }
@@ -1571,7 +1572,7 @@ button.flash {
     background: var(--ui-blue);
     border-radius: 2px;
 
-    color: var(--ui-black);
+    color: var(--ui-on-accent);
     font-variant: small-caps;
 	font-size: 10pt;
 }
@@ -1637,7 +1638,7 @@ button.flash {
     background: var(--ui-blue);
     border-radius: 2px;
 
-    color: var(--ui-black);
+    color: var(--ui-on-accent);
 
     user-select: none;
 }
@@ -1681,7 +1682,7 @@ label input[type="checkbox"] {
 }
 
 label input[type="checkbox"]:hover {
-    background: hsl(0, 0%, 80%);
+    background: var(--ui-panel-2, hsl(0, 0%, 80%));
 }
 
 label input[type="checkbox"]:checked {
@@ -1788,7 +1789,7 @@ label input[type="checkbox"]:checked::before {
     position: absolute;
     z-index: 3;
 
-    background: white;
+    background: var(--paper, white);
 }
 
 .arrow-endpoint:hover {
@@ -1851,10 +1852,10 @@ body:has(select[name="renderer"] > option[value="katex"]:checked) .typst-only {
 
 @keyframes breathe {
     from {
-        color: hsl(0, 0%, 0%);
+        color: var(--ink, hsl(0, 0%, 0%));
     }
     to {
-        color: hsl(0, 0%, 60%);
+        color: var(--ink-faded, hsl(0, 0%, 60%));
     }
 }
 

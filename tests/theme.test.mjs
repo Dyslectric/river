@@ -41,11 +41,13 @@ const { PALETTES, buildTheme, applyTheme, initialTheme, themeColour } =
 
 const REQUIRED_TOKENS = [
     "--ink", "--paper",
+    "--ink-faded",
     "--ui-black", "--ui-white", "--ui-blue", "--ui-orange",
     "--ui-background", "--ui-border", "--ui-hover", "--ui-active",
     "--ui-focus", "--ui-text", "--ui-error", "--ui-warning",
     "--ui-panel", "--ui-panel-2",
     "--ui-chip-text", "--ui-chip-text-faded",
+    "--ui-on-accent", "--ui-on-accent-faded", "--ui-blue-text",
     "--cell-hover", "--cell-selected", "--cell-source", "--cell-target",
     "--grid-line",
 ];
@@ -218,6 +220,20 @@ test("chip surface stays dark across all themes (no per-theme inversion)", () =>
         const t = buildTheme(PALETTES[name]);
         const bg = lightness(t["--ui-black"]);
         assert(bg < 50, `chip surface should be dark in ${name}, got L=${bg}`);
+    }
+});
+
+test("on-accent text contrasts with the accent surface in every theme", () => {
+    // This is the bug where bright pastel accents + light text made selection glyphs and
+    // focused inputs nearly invisible. on-accent must differ enough in lightness from the
+    // accent it sits on.
+    for (const name of Object.keys(PALETTES)) {
+        const t = buildTheme(PALETTES[name]);
+        const acc = lightness(t["--ui-blue"]);
+        const on = lightness(t["--ui-on-accent"]);
+        assert(acc !== null && on !== null, `accent lightness parseable in ${name}`);
+        assert(Math.abs(acc - on) >= 35,
+            `on-accent too close to accent in ${name}: |${on}-${acc}| < 35`);
     }
 });
 
