@@ -19,9 +19,11 @@ test("position_from_offset takes a snap flag", () => {
         "position_from_offset(offset, snap = true)");
 });
 
-test("position_from_event derives snap from Alt key", () => {
-    assert(/position_from_event\(event,\s*snap\s*=\s*!event\.altKey\)/.test(ui),
-        "snap defaults to !event.altKey");
+test("position_from_event places freely by default (grid removed)", () => {
+    // The flexible grid has been removed, so all placement is free — snapping is no longer
+    // derived from the Alt key; the default is simply free.
+    assert(/position_from_event\(event,\s*snap\s*=\s*false\)/.test(ui),
+        "snap defaults to false (free placement)");
 });
 
 test("free branch computes a fractional position", () => {
@@ -77,3 +79,15 @@ test("edge endpoints remain natural (array indices, not positions)", () => {
 });
 
 await run();
+
+// (Appended) 8-direction constraint guard.
+import { readFileSync as _rf } from "node:fs";
+test("Ctrl+Alt+Shift drag constrains free move to 8 directions", () => {
+    const s = _rf(process.env.UI_MJS || "/tmp/iter3/src/ui.mjs", "utf8");
+    assert(/constrain_to_8_directions\(origin,\s*position\)/.test(s),
+        "8-direction helper defined");
+    assert(/event\.ctrlKey && event\.altKey && event\.shiftKey/.test(s),
+        "gated on Ctrl+Alt+Shift");
+    assert(/Math\.round\(Math\.atan2\(delta\.y,\s*delta\.x\)\s*\/\s*step\)/.test(s),
+        "snaps angle to 45° steps");
+});

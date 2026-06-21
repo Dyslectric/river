@@ -285,7 +285,10 @@ kbd {
 }
 
 .focus-point.revealed {
-    background: hsla(0, 0%, 0%, 0.1);
+    /* The shaded "add vertex" box is intentionally not shown in this fork: vertices are
+       created with "v" under the cursor (or by dragging to connect), so the hover box is
+       unwanted visual noise. */
+    background: hsla(0, 0%, 0%, 0);
 }
 
 .focus-point.focused {
@@ -298,18 +301,18 @@ kbd {
 }
 
 .focus-point::before {
-    content: "Add vertex";
+    content: "";
     visibility: hidden;
     position: relative;
     top: -8px;
 }
 
 .focus-point.active::before {
-    content: "Add edge";
+    content: "";
 }
 
 .focus-point.revealed::before {
-    visibility: visible;
+    visibility: hidden;
 }
 
 .ui:not(.show-hints) .focus-point .tooltip, .focus-point:not(.focused) .tooltip, .tooltip:empty {

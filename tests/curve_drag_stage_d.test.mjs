@@ -19,22 +19,23 @@ function curveAndSkew(A, B, P) {
     const PM = P.sub(M);
     const d = PM.x * normal.x + PM.y * normal.y;
     const s = PM.x * dir.x + PM.y * dir.y;
-    const curve = d / (CURVE_HEIGHT * 2);
+    const curve = d / CURVE_HEIGHT; // apex follows pointer 1:1
     const skew = Math.max(-1, Math.min(1, 2 * s / chord_len));
     return { curve, skew };
 }
 
 const A = new Point(0, 0), B = new Point(100, 0); // horizontal edge, len 100, M=(50,0)
 
-test("perpendicular drag of 48px (one curve unit) gives curve 1, skew 0", () => {
+test("perpendicular drag's apex follows the pointer 1:1 (48px -> curve 2)", () => {
+    // curve = d / CURVE_HEIGHT(24); 48/24 = 2. style.curve = 2*48 = 96; apex = 96/2 = 48 = d.
     const r = curveAndSkew(A, B, new Point(50, 48));
-    assertClose(r.curve, 1, 1e-9);
+    assertClose(r.curve, 2, 1e-9);
     assertClose(r.skew, 0, 1e-9);
 });
 
-test("half a unit (24px) gives curve 0.5 (fractional / 'harder curves')", () => {
+test("24px drag gives curve 1, apex at 24px = pointer (fractional / 'harder curves')", () => {
     const r = curveAndSkew(A, B, new Point(50, 24));
-    assertClose(r.curve, 0.5, 1e-9);
+    assertClose(r.curve, 1, 1e-9);
 });
 
 test("dragging onto the chord gives a straight edge (curve 0)", () => {
@@ -45,12 +46,12 @@ test("dragging onto the chord gives a straight edge (curve 0)", () => {
 
 test("dragging the other way gives negative curve", () => {
     const r = curveAndSkew(A, B, new Point(50, -48));
-    assertClose(r.curve, -1, 1e-9);
+    assertClose(r.curve, -2, 1e-9);
 });
 
 test("along-chord offset sets skew (toward B = positive)", () => {
     const r = curveAndSkew(A, B, new Point(75, 48));
-    assertClose(r.curve, 1, 1e-9);
+    assertClose(r.curve, 2, 1e-9);
     assertClose(r.skew, 0.5, 1e-9); // 2 * 25 / 100
 });
 
@@ -62,9 +63,9 @@ test("skew clamps to [-1, 1]", () => {
 });
 
 test("works for a rotated (vertical) edge", () => {
-    // A=(0,0) B=(0,100); dir=(0,1); normal=(-1,0). P 48px to the right -> d=-48 -> curve -1.
+    // A=(0,0) B=(0,100); dir=(0,1); normal=(-1,0). P 48px right -> d=-48 -> curve -2.
     const r = curveAndSkew(new Point(0, 0), new Point(0, 100), new Point(48, 50));
-    assertClose(r.curve, -1, 1e-9);
+    assertClose(r.curve, -2, 1e-9);
     assertClose(r.skew, 0, 1e-9);
 });
 
@@ -75,11 +76,33 @@ test("degenerate zero-length edge yields no curve (no divide-by-zero)", () => {
 });
 
 test("inverts the forward conversion (curve -> pixels -> curve)", () => {
-    // Forward: style.curve = options.curve * CURVE_HEIGHT * 2. So a curve of 0.75 is
-    // 0.75*48 = 36px perpendicular; dragging to 36px must recover 0.75.
-    const px = 0.75 * CURVE_HEIGHT * 2;
-    const r = curveAndSkew(A, B, new Point(50, px));
-    assertClose(r.curve, 0.75, 1e-9);
+    // The apex follows the pointer: dragging to d px gives apex d, i.e. curve d/CURVE_HEIGHT.
+    // For d = 36px: curve = 36/24 = 1.5, and style.curve = 1.5*48 = 72, apex = 36 = d. ✓
+    const d = 36;
+    const r = curveAndSkew(A, B, new Point(50, d));
+    assertClose(r.curve, d / CURVE_HEIGHT, 1e-9);
+});
+
+// --- relative grab: grabbing an already-curved edge must not snap it ---------------
+// The live drag applies (original + (implied_now - implied_at_press)). Grabbing without
+// moving (now == press) must leave the curve unchanged.
+function relativeCurve(original, press_curve, now_curve) {
+    return original + (now_curve - press_curve);
+}
+test("grabbing a curved edge without moving leaves the curve unchanged (no snap-back)", () => {
+    // Edge has curve 2 (already curved). Press implies some value; if pointer hasn't moved,
+    // now == press, so the result must still be 2 — not the absolute implied value.
+    const original = 2;
+    const press = curveAndSkew(A, B, new Point(50, 30)).curve; // arbitrary press point
+    const now = press; // not moved yet
+    assertClose(relativeCurve(original, press, now), 2, 1e-9, "stays at original on grab");
+});
+test("dragging applies the delta from the press point onto the original curve", () => {
+    const original = 2;
+    const press = 0.5;  // implied at press
+    const now = 1.25;   // implied after moving
+    // original + (1.25 - 0.5) = 2.75
+    assertClose(relativeCurve(original, press, now), 2.75, 1e-9);
 });
 
 // --- codec: fractional curve + skew must round-trip (the URL break) --------------

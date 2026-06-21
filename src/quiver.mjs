@@ -1591,6 +1591,17 @@ QuiverImportExport.base64 = new class extends QuiverImportExport {
                         assert_kind(options.skew, "float");
                         assert(options.skew >= -1 && options.skew <= 1, "invalid skew");
                     }
+                    if (options.hasOwnProperty("endpoint_t")) {
+                        // Per-end parameter in [0,1] along a target edge, or null (midpoint).
+                        for (const end of ["source", "target"]) {
+                            if (options.endpoint_t.hasOwnProperty(end)
+                                && options.endpoint_t[end] !== null) {
+                                assert_kind(options.endpoint_t[end], "float");
+                                assert(options.endpoint_t[end] >= 0
+                                    && options.endpoint_t[end] <= 1, "invalid endpoint_t");
+                            }
+                        }
+                    }
                     if (options.hasOwnProperty("radius")) {
                         assert_kind(options.radius, "integer");
                     }

@@ -504,6 +504,15 @@ UIMode.Connect = class extends UIMode {
                 target: [this.source, this.target],
             }[end];
             edge.reconnect(ui, source, target);
+            // Stage E: persist where along the target edge this end attached (or clear it
+            // if not sliding / target is a vertex).
+            const sliding = this.reconnect.slide_t;
+            if (sliding !== null && sliding !== undefined
+                && this.target !== null && !this.target.is_vertex()) {
+                edge.options.endpoint_t[end] = sliding;
+            } else {
+                edge.options.endpoint_t[end] = null;
+            }
             return edge;
         }
     }
@@ -555,14 +564,26 @@ UIMode.PointerMove = class extends UIMode {
 
 /// An edge is being bent into a curve by dragging its midpoint handle (Stage D).
 UIMode.CurveDrag = class extends UIMode {
-    constructor(ui, edge) {
+    constructor(ui, edge, press_offset = null) {
         super();
         this.name = "curve-drag";
         /// The edge being curved.
         this.edge = edge;
-        /// The curve/skew the edge had at drag start, for history/undo.
+        /// The curve/skew the edge had at drag start, for history/undo and for relative
+        /// dragging (so grabbing an already-curved edge doesn't snap it to the pointer).
         this.original_curve = edge.options.curve;
         this.original_skew = edge.options.skew || 0;
+        /// The curve/skew the pointer *implies* at the press point. The live drag applies
+        /// the change in implied value relative to this, so the edge moves smoothly from
+        /// its current curve rather than jumping to an absolute value on the first frame.
+        this.press_curve = null;
+        this.press_skew = null;
+        if (press_offset !== null) {
+            const { source, target } = edge.arrow.origin();
+            const implied = UI.curve_and_skew_from_drag(source, target, press_offset);
+            this.press_curve = implied.curve;
+            this.press_skew = implied.skew;
+        }
     }
 
     release() {}
@@ -721,6 +742,10 @@ class UI {
         // The position of focus for the keyboard, i.e. where new cells will be added if Space is
         // pressed.
         this.focus_position = Position.zero();
+
+        // The latest pointer offset (screen space), tracked on pointermove so keyboard
+        // shortcuts like "v" can create a vertex under the cursor. Null until first move.
+        this.pointer_offset = null;
 
         // The element associated with the focus position.
         this.focus_point = null;
@@ -1263,6 +1288,9 @@ class UI {
         };
 
         document.addEventListener(pointer_event("move"), (event) => {
+            // Track the latest pointer location so keyboard shortcuts (e.g. "v") can act at
+            // the cursor.
+            this.pointer_offset = this.offset_from_event(event);
             if (this.in_mode(UIMode.Pan)) {
                 if (this.mode.key !== null) {
                     // If we're panning, but no longer holding the requisite key, stop.
@@ -1697,7 +1725,15 @@ class UI {
                 this.focus_point.class_list.add("active");
             }
 
-            const position = this.position_from_event(event);
+            let position = this.position_from_event(event);
+
+            // Ctrl+Alt+Shift while moving locks the displacement (from the drag origin) to
+            // the nearest of 8 compass directions, keeping the distance free. Alt already
+            // makes the move free (fractional); Shift adds the directional constraint.
+            if (this.in_mode(UIMode.PointerMove)
+                && event.ctrlKey && event.altKey && event.shiftKey) {
+                position = UI.constrain_to_8_directions(this.mode.origin, position);
+            }
 
             // Bending an edge into a curve by dragging its midpoint handle (Stage D).
             if (this.in_mode(UIMode.CurveDrag)) {
@@ -1707,9 +1743,18 @@ class UI {
                 const { source, target } = edge.arrow.origin();
                 const P = this.offset_from_event(event);
                 const { curve, skew } = UI.curve_and_skew_from_drag(source, target, P);
-                // Apply live. options.curve may now be fractional (free curving).
-                edge.options.curve = curve;
-                edge.options.skew = skew;
+                // Apply relative to the press point: the edge moves by the CHANGE in implied
+                // curve/skew since grabbing, starting from its original value. This avoids a
+                // snap-back/jump on the first frame when grabbing an already-curved edge.
+                if (this.mode.press_curve !== null) {
+                    edge.options.curve = this.mode.original_curve
+                        + (curve - this.mode.press_curve);
+                    edge.options.skew = Math.max(-1, Math.min(1,
+                        this.mode.original_skew + (skew - this.mode.press_skew)));
+                } else {
+                    edge.options.curve = curve;
+                    edge.options.skew = skew;
+                }
                 UI.update_style(edge.arrow, edge.options);
                 edge.arrow.redraw();
                 // Re-render dependents so connected edges follow.
@@ -1804,6 +1849,37 @@ class UI {
 
                 // Update the position of the cursor.
                 const offset = this.offset_from_event(event);
+                // Stage E: if we're reconnecting an endpoint and Shift is held while
+                // hovering over another EDGE, compute where along that edge the pointer
+                // projects, so the endpoint slides along the target. While Shift stays held,
+                // we LATCH onto that edge: the endpoint stays locked to it and keeps
+                // projecting even if the pointer wanders off the line. Releasing Shift (or
+                // the absence of any edge to latch) clears the lock.
+                if (this.mode.reconnect !== null) {
+                    if (event.shiftKey) {
+                        // Acquire the lock ONCE, the first time we're over an edge target
+                        // with Shift held. Once latched, we stay on that edge for the rest
+                        // of the Shift-held drag — crossing other edges does NOT switch it.
+                        if (this.mode.reconnect.slide_lock == null
+                            && this.mode.target !== null && !this.mode.target.is_vertex()
+                            && typeof this.mode.target.project_t === "function") {
+                            this.mode.reconnect.slide_lock = this.mode.target;
+                        }
+                        const locked = this.mode.reconnect.slide_lock;
+                        if (locked != null && typeof locked.project_t === "function") {
+                            // Keep the endpoint attached to the locked edge, projecting the
+                            // pointer onto it even when over a different edge or off-line.
+                            this.mode.target = locked;
+                            this.mode.reconnect.slide_t = locked.project_t(offset);
+                        } else {
+                            this.mode.reconnect.slide_t = null;
+                        }
+                    } else {
+                        // Shift released: drop the lock and resume normal reconnect.
+                        this.mode.reconnect.slide_lock = null;
+                        this.mode.reconnect.slide_t = null;
+                    }
+                }
                 this.mode.update(this, offset);
 
                 // Hide the side panel if the user is dragging an edge beneath it.
@@ -2146,9 +2222,46 @@ class UI {
             }
         });
 
-        // Holding Option (Alt) triggers panning mode (and releasing ends panning mode).
-        // Control is intentionally NOT a pan modifier: it is reserved for vertex moving
-        // (Ctrl+drag = move, Ctrl+Alt+drag = free move).
+        // Pressing "v" with nothing selected creates a new vertex under the cursor. (When a
+        // cell IS selected, "v" keeps its existing meaning of left-aligning the label, which
+        // is handled by the label-alignment option list.)
+        this.shortcuts.add([
+            { key: "V", context: Shortcuts.SHORTCUT_PRIORITY.Defer },
+        ], () => {
+            // Only act when there is no current selection.
+            if (this.selection.size > 0) {
+                return false;
+            }
+            // We need a known cursor location; if the pointer hasn't moved yet, fall back to
+            // the focus position. We shift the offset up-and-left by half a cell so the
+            // vertex's CENTRE lands under the cursor (a position denotes a cell's top-left,
+            // but vertices render centred within the cell).
+            let position;
+            if (this.pointer_offset !== null) {
+                const half = new Offset(
+                    this.cell_size(this.cell_width, 0) / 2,
+                    this.cell_size(this.cell_height, 0) / 2,
+                );
+                position = this.position_from_offset(this.pointer_offset.sub(half), false);
+            } else {
+                position = this.focus_position;
+            }
+            this.deselect();
+            const label = {
+                "katex": "\\bullet",
+                "typst": "bullet",
+            }[this.settings.get("quiver.renderer")];
+            const vertex = new Vertex(this, label, position);
+            this.select(vertex);
+            this.history.add(this, [{
+                kind: "create",
+                cells: new Set([vertex]),
+            }]);
+            // Focus the label input so the user can immediately type a label.
+            this.panel.label_input.element.select();
+            return true;
+        });
+
         this.shortcuts.add([
             { key: "Alt", context: Shortcuts.SHORTCUT_PRIORITY.Always },
         ], (event) => {
@@ -2510,7 +2623,10 @@ class UI {
     /// Get the width or height of a particular grid cell. You should use this instead of directly
     /// accessing `cell_width` or `cell_height` to ensure it defaults to `default_cell_size`.
     cell_size(sizes, index) {
-        return sizes.get(index) || this.default_cell_size;
+        // The flexible grid has been removed: every cell is a fixed, uniform size. This
+        // keeps the position<->pixel mapping constant so moving vertices never reflows the
+        // layout (which previously caused a "rubber-banding" snap-back during free drags).
+        return this.default_cell_size;
     }
 
     /// Get a column or row number corresponding to an offset (in pixels), as well as the partial
@@ -2584,7 +2700,10 @@ class UI {
 
     /// A helper method for getting a position from an event. Holding Alt/Option disables
     /// snapping for free placement (live, while the modifier is held).
-    position_from_event(event, snap = !event.altKey) {
+    /// A helper method for getting a position from an event. With the grid removed, all
+    /// placement is free (no snapping); the parameter remains for callers that still pass
+    /// an explicit value, but the default is now free.
+    position_from_event(event, snap = false) {
         return this.position_from_offset(this.offset_from_event(event), snap);
     }
 
@@ -2657,6 +2776,14 @@ class UI {
     /// Returns whether the entire quiver was rerendered (in which case the caller may be able to
     /// avoid rerendering).
     update_col_row_size(...positions) {
+        // The flexible grid has been removed, so column/row sizes never change and nothing
+        // reflows. This is now a no-op that reports "no resize occurred" (false), so callers
+        // fall through to their lightweight per-cell rerender path instead of a full redraw.
+        return false;
+        // eslint-disable-next-line no-unreachable
+    }
+
+    update_col_row_size_DISABLED(...positions) {
         // If no sizes change, we do not have to redraw the grid and cells. Otherwise, we must
         // redraw everything, as a resized column or row essentially reflows the entire graph.
         let rerender = false;
@@ -2781,6 +2908,24 @@ class UI {
         return Math.round(coord);
     }
 
+    /// Constrain a free position so its displacement from `origin` points along the
+    /// nearest of 8 compass directions (N/S/E/W + diagonals), keeping the distance free.
+    /// Used by Ctrl+Alt+Shift drag. Math validated independently against ground truth.
+    static constrain_to_8_directions(origin, position) {
+        const delta = position.sub(origin);
+        const mag = delta.length();
+        if (mag < 1e-9) {
+            return position;
+        }
+        const step = Math.PI / 4; // 45°
+        const snapped_angle = Math.round(Math.atan2(delta.y, delta.x) / step) * step;
+        const snapped = new Position(
+            Math.cos(snapped_angle) * mag,
+            Math.sin(snapped_angle) * mag,
+        );
+        return origin.add(snapped);
+    }
+
     /// Given an edge's two endpoint origins (screen space) and a dragged handle point P,
     /// compute the fractional `curve` (bend height in CURVE_HEIGHT units) and `skew`
     /// (apex offset along the chord, -1..1). Inverse of the forward conversion
@@ -2799,7 +2944,11 @@ class UI {
         const PM = P.sub(M);
         const d = PM.x * normal.x + PM.y * normal.y;   // signed perpendicular distance
         const s = PM.x * dir.x + PM.y * dir.y;          // signed along-chord offset
-        const curve = d / (CONSTANTS.CURVE_HEIGHT * 2);
+        // A quadratic Bézier's visual apex reaches only HALF its control-point height
+        // (style.curve / 2), and style.curve = curve * CURVE_HEIGHT * 2. So to make the
+        // apex track the pointer's perpendicular distance `d` exactly (1:1, instead of
+        // rising at half speed and feeling like it tapers off), curve = d / CURVE_HEIGHT.
+        const curve = d / CONSTANTS.CURVE_HEIGHT;
         const skew = Math.max(-1, Math.min(1, 2 * s / chord_len));
         return { curve, skew };
     }
@@ -3268,6 +3417,20 @@ class UI {
 
     /// Update the grid with respect to the view and size of the window.
     update_grid() {
+        // The grid has been removed: render a blank canvas. We still size/clear the grid
+        // canvas (so it doesn't show stale lines), then return before drawing any lines.
+        const canvas = this.grid;
+        if (canvas) {
+            const scale = 2 ** this.scale;
+            const [w, h] = [document.body.offsetWidth, document.body.offsetHeight];
+            canvas.resize(w, h);
+            canvas.context.clearRect(0, 0, w * scale, h * scale);
+        }
+        return;
+        // eslint-disable-next-line no-unreachable
+    }
+
+    update_grid_DISABLED() {
         // Constants for parameters of the grid pattern.
         // The (average) length of the dashes making up the cell border lines.
         const DASH_LENGTH = this.default_cell_size / 16;
@@ -7630,7 +7793,7 @@ class Cell {
                     event.stopImmediatePropagation();
                     event.preventDefault();
                     ui.dismiss_pane();
-                    ui.switch_mode(new UIMode.CurveDrag(ui, this));
+                    ui.switch_mode(new UIMode.CurveDrag(ui, this, ui.offset_from_event(event)));
                     return;
                 }
                 if (ui.in_mode(UIMode.Default) || ui.in_mode(UIMode.Command)) {
@@ -8029,6 +8192,10 @@ export class Edge extends Cell {
             // source/target edge (`true`), or to the midpoint of the source and target of the
             // source/target edge (`false`).
             edge_alignment: { source: true, target: true },
+            // When an end is attached to another EDGE, this is the parameter t in [0,1]
+            // along that target edge at which to attach (null = the edge's midpoint, the
+            // default). Set by Shift-dragging the reconnect handle along the target (Stage E).
+            endpoint_t: { source: null, target: null },
             // For historical reasons, the following options are in a `style` subobject. Originally,
             // these were those pertaining to the edge style. However, options such as `curve` and
             // `level` also pertain to the edge style (and can only be set for arrows), but are not
@@ -8101,16 +8268,63 @@ export class Edge extends Cell {
         ui.panel.render_maths(ui, this);
     }
 
+    /// Return a `Shape.Endpoint` at parameter `t` in [0,1] along this edge, in screen
+    /// space. Other edges attach here when sliding their endpoint along this one (Stage E).
+    /// At t = 0.5 this equals this edge's midpoint `shape` (regression-checked).
+    attach_shape_at(t) {
+        const curve = this.arrow.curve(Point.zero(), 0);
+        const point = curve.point(Math.max(0, Math.min(1, t)));
+        const origin = (this._relative_position || ((p) => p))(point);
+        return new Shape.Endpoint(origin);
+    }
+
+    /// Project a screen-space point `P` onto this edge's chord, returning the parameter
+    /// t in [0,1] (clamped). Used to compute where along the edge a dragged endpoint
+    /// should attach. For a curved target this projects onto the chord (an approximation).
+    project_t(P) {
+        const { source, target } = this.arrow.origin();
+        const ABx = target.x - source.x, ABy = target.y - source.y;
+        const len2 = ABx * ABx + ABy * ABy;
+        if (len2 < 1e-12) {
+            return 0;
+        }
+        const t = ((P.x - source.x) * ABx + (P.y - source.y) * ABy) / len2;
+        return Math.max(0, Math.min(1, t));
+    }
+
     /// Create the HTML element associated with the edge.
     /// Note that `render_maths` triggers redrawing the edge, rather than the other way around.
     render(ui, pointer_offset = null) {
         if (pointer_offset !== null) {
             const end = ui.mode.reconnect.end;
+            // Keep the OTHER (non-dragged) end attached where it belongs — including at its
+            // own endpoint_t along a target edge — so it doesn't revert to the target's
+            // midpoint for the duration of the slide.
+            const other_end = end === "source" ? "target" : "source";
+            {
+                const t = this.options.endpoint_t[other_end];
+                if (t !== null && t !== undefined && !this[other_end].is_vertex()
+                    && typeof this[other_end].attach_shape_at === "function") {
+                    this.arrow[other_end] = this[other_end].attach_shape_at(t);
+                } else {
+                    this.arrow[other_end] = this.options.edge_alignment[other_end] ?
+                        this[other_end].shape : this[other_end].phantom_shape;
+                }
+            }
             if (ui.mode.target !== null) {
                 // In this case, we're hovering over another cell.
-                this.arrow[end] =
-                    (ui.mode.target.is_vertex() || this.options.edge_alignment[end]) ?
-                        ui.mode.target.shape : ui.mode.target.phantom_shape
+                // If Alt is held and the target is an EDGE, slide the attach point along
+                // that edge to where the pointer projects (Stage E); otherwise attach at
+                // the target's midpoint as usual.
+                if (ui.mode.reconnect.slide_t !== null && ui.mode.reconnect.slide_t !== undefined
+                    && !ui.mode.target.is_vertex()
+                    && typeof ui.mode.target.attach_shape_at === "function") {
+                    this.arrow[end] = ui.mode.target.attach_shape_at(ui.mode.reconnect.slide_t);
+                } else {
+                    this.arrow[end] =
+                        (ui.mode.target.is_vertex() || this.options.edge_alignment[end]) ?
+                            ui.mode.target.shape : ui.mode.target.phantom_shape;
+                }
             } else {
                 // In this case, we're not hovering over another cell.
                 // Usually we offset edge endpoints from the cells to which they are connected,
@@ -8119,8 +8333,16 @@ export class Edge extends Cell {
             }
         } else {
             for (const end of ["source", "target"]) {
-                this.arrow[end] = this.options.edge_alignment[end] ?
-                    this[end].shape : this[end].phantom_shape
+                const t = this.options.endpoint_t[end];
+                // If this end attaches to another EDGE at a specific parameter t along it,
+                // attach there (Stage E). Otherwise fall back to the midpoint/phantom shape.
+                if (t !== null && t !== undefined && !this[end].is_vertex()
+                    && typeof this[end].attach_shape_at === "function") {
+                    this.arrow[end] = this[end].attach_shape_at(t);
+                } else {
+                    this.arrow[end] = this.options.edge_alignment[end] ?
+                        this[end].shape : this[end].phantom_shape;
+                }
             }
         }
 
@@ -8168,6 +8390,9 @@ export class Edge extends Cell {
             // `centre` will be `null` only if we've already updated the origin.
             this.shape.origin = relative_position(centre);
             this.phantom_shape.origin = relative_position(midpoint);
+            // Remember how to map a parameter t in [0,1] along this edge to a screen point,
+            // so that other edges can attach at an arbitrary point along this one (Stage E).
+            this._relative_position = relative_position;
         }
 
         // Move the jump label to the centre of the edge. We may not have created the `kbd` element

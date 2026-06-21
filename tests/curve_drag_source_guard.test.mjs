@@ -28,7 +28,7 @@ test("Alt+drag on an edge enters CurveDrag (not a separate handle)", () => {
     // the higher-arrow connect arms. Plain drag out of an edge still draws a next arrow.
     assert(/event\.altKey && !this\.is_vertex\(\)/.test(src),
         "Alt + edge press starts curving");
-    assert(/new UIMode\.CurveDrag\(ui,\s*this\)/.test(src),
+    assert(/new UIMode\.CurveDrag\(ui,\s*this/.test(src),
         "the intercept enters CurveDrag");
     assert(!/class:\s*"curve-handle"/.test(src),
         "the separate plain-drag curve handle is removed");
@@ -48,6 +48,15 @@ test("pointerup commits a curve history action including skew", () => {
 test("the curve history case restores skew", () => {
     assert(/curve\.skew_from !== undefined/.test(src),
         "curve undo restores skew when present");
+});
+
+test("CurveDrag is relative to the press point (no snap-back on grab)", () => {
+    assert(/press_curve/.test(src) && /press_skew/.test(src),
+        "CurveDrag captures the implied curve/skew at the press point");
+    assert(/this\.mode\.original_curve\s*\+\s*\(curve - this\.mode\.press_curve\)/.test(src),
+        "live curve applied relative to the press point");
+    assert(/new UIMode\.CurveDrag\(ui,\s*this,\s*ui\.offset_from_event\(event\)\)/.test(src),
+        "press offset passed into CurveDrag");
 });
 
 test("the URL codec accepts fractional curve and validates skew", () => {
