@@ -118,6 +118,43 @@ test("top-left offset normalisation preserves relative fractional layout", () =>
     assertClose(back[0].y, verts[0].y, 1e-12);
 });
 
+// --- decode validation: fractional positions must pass (the malformed-URL bug) ----
+
+// Mirrors quiver.mjs assert_kind for "natural" vs "float".
+function assert_kind(value, kind) {
+    if (kind === "natural") {
+        return Number.isInteger(value) && value >= 0;
+    }
+    if (kind === "float") {
+        return typeof value === "number";
+    }
+    return false;
+}
+
+test("fractional positions FAIL the old 'natural' check (root cause of malformed URL)", () => {
+    // This documents why share URLs broke: a free-positioned vertex at x=3.4 was rejected.
+    assert(!assert_kind(3.4, "natural"), "3.4 is not a natural -> old decoder threw");
+    assert(!assert_kind(0.5, "natural"), "0.5 is not a natural");
+});
+
+test("fractional positions PASS the new 'float' check", () => {
+    assert(assert_kind(3.4, "float"), "fractional x accepted");
+    assert(assert_kind(0.5, "float"), "fractional y accepted");
+    assert(assert_kind(-1.25, "float"), "negative fractional accepted");
+});
+
+test("integer positions still pass the float check (old diagrams load)", () => {
+    assert(assert_kind(0, "float"), "0 accepted");
+    assert(assert_kind(5, "float"), "5 accepted");
+    assert(assert_kind(-3, "float"), "-3 accepted");
+});
+
+test("edge endpoint indices must stay natural (they are array indices, not positions)", () => {
+    // Endpoints are indices into the vertex list; they must remain integers.
+    assert(assert_kind(2, "natural"), "index 2 valid");
+    assert(!assert_kind(2.5, "natural"), "a fractional index would be invalid");
+});
+
 // --- spatial collision in free mode (excluding the dragged set) ------------------
 
 function vertex_near(cells, position, radius, exclude) {

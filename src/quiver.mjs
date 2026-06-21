@@ -1520,8 +1520,11 @@ QuiverImportExport.base64 = new class extends QuiverImportExport {
 
                     assert(cell.length >= 2 && cell.length <= 4, "invalid vertex format");
                     const [x, y, label = "", label_colour = Colour.black().hsla()] = cell;
-                    assert_kind(x, "natural");
-                    assert_kind(y, "natural");
+                    // Positions may be fractional (free positioning), so validate as floats
+                    // rather than naturals. Integers are valid floats, so diagrams saved with
+                    // integer (grid-snapped) positions continue to load unchanged.
+                    assert_kind(x, "float");
+                    assert_kind(y, "float");
                     assert_kind(label, "string");
                     assert_kind(label_colour, "colour");
 

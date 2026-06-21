@@ -62,4 +62,18 @@ test("vertex move is gated behind Ctrl (Ctrl+Alt frees it)", () => {
         "Ctrl should no longer be bound to panning");
 });
 
+test("decoder accepts fractional vertex positions (float), not naturals", () => {
+    // The share-URL 'malformed diagram' bug: positions were validated as naturals, which
+    // rejected free-positioned (fractional) vertices. They must now be floats.
+    const decodeRegion = quiver.match(/this cell is a vertex[\s\S]*?assert_kind\(label, "string"\)/i);
+    assert(decodeRegion, "vertex decode block found");
+    assert(/assert_kind\(x, "float"\)/.test(decodeRegion[0]), "x validated as float");
+    assert(/assert_kind\(y, "float"\)/.test(decodeRegion[0]), "y validated as float");
+});
+
+test("edge endpoints remain natural (array indices, not positions)", () => {
+    assert(/assert_kind\(endpoint, "natural"\)/.test(quiver),
+        "edge endpoint indices stay natural");
+});
+
 await run();

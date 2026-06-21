@@ -5576,77 +5576,14 @@ class Panel {
             },
         ).set_attributes({ class: "short katex-only" });
 
-        // The export buttons.
-        const export_to_latex = Panel.create_button_with_shortcut(
-            ui,
-            "LaTeX",
-            "LaTeX",
-            { key: "E", modifier: true, context: Shortcuts.SHORTCUT_PRIORITY.Always },
-            () => {
-                if (ui.settings.get("quiver.renderer") === "katex") {
-                    display_port_pane("export", "tikz-cd");
-                }
-            },
-        ).set_attributes({ class: "katex-only" });
-        const export_to_typst = Panel.create_button_with_shortcut(
-            ui,
-            "Typst",
-            "Typst",
-            { key: "E", modifier: true, context: Shortcuts.SHORTCUT_PRIORITY.Always },
-            () => {
-                if (ui.settings.get("quiver.renderer") === "typst") {
-                    display_port_pane("export", "fletcher");
-                }
-            }
-        ).set_attributes({ class: "typst-only" });
+        // (The LaTeX and Typst export buttons have been removed in this fork: LaTeX export
+        // is not currently supported with free positioning, and Typst is not used. URL and
+        // HTML export remain.)
 
-        // Create the `<select>` for the current maths renderer.
-        const renderer_select = new DOM.Element("select", { name: "renderer" })
-            .listen("change", (event) => {
-                const renderer = event.target.value;
-                ui.settings.set("quiver.renderer", renderer);
-
-                const previous_bullet = `${renderer === "typst" ? "\\" : ""}bullet`;
-                const new_bullet = `${renderer === "typst" ? "" : "\\"}bullet`;
-                if (!ui.quiver.is_empty()) {
-                    for (const vertex of ui.quiver.cells[0]) {
-                        if (vertex.label === previous_bullet) {
-                            vertex.label = new_bullet;
-                        }
-                    }
-                }
-
-                const label_rerender = () => {
-                    ui.quiver.all_cells().forEach((cell) => ui.panel.render_maths(ui, cell));
-                };
-
-                switch (renderer) {
-                    case "katex":
-                        // KaTeX is always loaded, so we can immediately rerender.
-                        label_rerender();
-                        break;
-
-                    case "typst":
-                        // We must load Typst before rendering.
-                        load_typst(ui).then((_) => {
-                            label_rerender();
-                        });
-                        break;
-                }
-            });
-
-        // Add the options to the `<select>`.
-        for (const [renderer, text] of [["katex", "LaTeX"], ["typst", "Typst"]]) {
-            const option = new DOM.Element("option").set_attributes({
-                value: renderer
-            }).add(text);
-            renderer_select.add(option);
-        }
-        renderer_select.element.value = ui.settings.get("quiver.renderer");
+        // (The renderer selector has been removed: this fork is LaTeX/KaTeX-only, so the
+        // renderer is fixed to the default "katex" — see CONSTANTS.DEFAULT_RENDERER.)
 
         this.global = new DOM.Div({ class: "panel global" }).add(
-            new DOM.Element("label").add("Renderer: ")
-        ).add(renderer_select).add(
             new DOM.Element("label").add("Import: ").set_attributes({ "class": "katex-only" })
         ).add(import_from_tikz).add(
             new DOM.Element("label").add("Export: ")
@@ -5662,7 +5599,7 @@ class Panel {
               .listen("click", () => {
                   display_port_pane("export", "html");
               })
-        ).add(export_to_latex).add(export_to_typst).add(
+        ).add(
             new DOM.Div({ class: "indicator-container katex-only" }).add(
                 new DOM.Element("label").add("Macros: ")
                     .add(
@@ -8442,7 +8379,10 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     // Immediately load the KaTeX library as an ES6 module (regardless of the current renderer).
-    KaTeX = import("/KaTeX/katex.mjs").then((module) => {
+    // Use a path relative to this module (import.meta.url) rather than an absolute "/KaTeX/..."
+    // path, so KaTeX resolves correctly when the app is opened at a share URL (which carries a
+    // query string) or served from a sub-path, not just from the domain root.
+    KaTeX = import(new URL("./KaTeX/katex.mjs", import.meta.url).href).then((module) => {
         // KaTeX is fast enough to be worth waiting for, but not
         // immediately available. In this case, we delay loading
         // the quiver until the library has loaded.
@@ -8457,10 +8397,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Load the style sheet needed for KaTeX.
+    // Load the style sheet needed for KaTeX (relative to this module, as above).
     document.head.appendChild(new DOM.Element("link", {
         rel: "stylesheet",
-        href: "KaTeX/katex.css",
+        href: new URL("./KaTeX/katex.css", import.meta.url).href,
     }).element);
 
     // Prevent clicking on the logo from having any effect other than opening the link.
