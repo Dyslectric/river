@@ -1859,3 +1859,8 @@ body:has(select[name="renderer"] > option[value="katex"]:checked) .typst-only {
     }
 }
 
+
+/* While Alt+dragging an edge into a curve (Stage D), show a grabbing cursor. */
+.ui.curve-drag, .ui.curve-drag * {
+    cursor: grabbing !important;
+}

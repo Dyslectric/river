@@ -1392,6 +1392,7 @@ QuiverImportExport.base64 = new class extends QuiverImportExport {
                         break;
                     case "arc":
                         delete delta["curve"];
+                        delete delta["skew"];
                         break;
                 }
 
@@ -1581,7 +1582,14 @@ QuiverImportExport.base64 = new class extends QuiverImportExport {
                         assert_kind(options.offset, "integer");
                     }
                     if (options.hasOwnProperty("curve")) {
-                        assert_kind(options.curve, "integer");
+                        // Curve may be fractional (drag-curving, Stage D). Integers are
+                        // valid floats, so diagrams with integer curve levels still load.
+                        assert_kind(options.curve, "float");
+                    }
+                    if (options.hasOwnProperty("skew")) {
+                        // Skew is a fractional asymmetry in [-1, 1] (drag-curving).
+                        assert_kind(options.skew, "float");
+                        assert(options.skew >= -1 && options.skew <= 1, "invalid skew");
                     }
                     if (options.hasOwnProperty("radius")) {
                         assert_kind(options.radius, "integer");

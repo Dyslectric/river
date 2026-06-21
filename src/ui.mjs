@@ -553,6 +553,21 @@ UIMode.PointerMove = class extends UIMode {
     }
 };
 
+/// An edge is being bent into a curve by dragging its midpoint handle (Stage D).
+UIMode.CurveDrag = class extends UIMode {
+    constructor(ui, edge) {
+        super();
+        this.name = "curve-drag";
+        /// The edge being curved.
+        this.edge = edge;
+        /// The curve/skew the edge had at drag start, for history/undo.
+        this.original_curve = edge.options.curve;
+        this.original_skew = edge.options.skew || 0;
+    }
+
+    release() {}
+};
+
 /// Cells are being moved to a different position, via the keyboard.
 UIMode.KeyMove = class extends UIMode {
     constructor(ui) {
@@ -1380,6 +1395,23 @@ class UI {
                     if (this.in_mode(UIMode.Pan)) {
                         // We only want to pan when the pointer is held.
                         this.mode.origin = null;
+                    } else if (this.in_mode(UIMode.CurveDrag)) {
+                        // Commit the curve change to history (for undo), if it changed.
+                        const edge = this.mode.edge;
+                        if (edge.options.curve !== this.mode.original_curve
+                            || (edge.options.skew || 0) !== this.mode.original_skew) {
+                            this.history.add(this, [{
+                                kind: "curve",
+                                curves: [{
+                                    edge,
+                                    from: this.mode.original_curve,
+                                    to: edge.options.curve,
+                                    skew_from: this.mode.original_skew,
+                                    skew_to: edge.options.skew || 0,
+                                }],
+                            }]);
+                        }
+                        this.switch_mode(UIMode.default);
                     } else if (this.in_mode(UIMode.PointerMove)) {
                         commit_move_event();
                         this.switch_mode(UIMode.default);
@@ -1666,6 +1698,27 @@ class UI {
             }
 
             const position = this.position_from_event(event);
+
+            // Bending an edge into a curve by dragging its midpoint handle (Stage D).
+            if (this.in_mode(UIMode.CurveDrag)) {
+                event.preventDefault();
+                const edge = this.mode.edge;
+                // Endpoint origins in screen space.
+                const { source, target } = edge.arrow.origin();
+                const P = this.offset_from_event(event);
+                const { curve, skew } = UI.curve_and_skew_from_drag(source, target, P);
+                // Apply live. options.curve may now be fractional (free curving).
+                edge.options.curve = curve;
+                edge.options.skew = skew;
+                UI.update_style(edge.arrow, edge.options);
+                edge.arrow.redraw();
+                // Re-render dependents so connected edges follow.
+                for (const cell of this.quiver.transitive_dependencies([edge])) {
+                    cell.render(this);
+                }
+                this.panel.update(this);
+                return;
+            }
 
             // Moving cells around with the pointer.
             if (this.in_mode(UIMode.PointerMove)) {
@@ -2726,6 +2779,29 @@ class UI {
     /// a freely-placed vertex still contributes sensible grid-line spacing.
     grid_key(coord) {
         return Math.round(coord);
+    }
+
+    /// Given an edge's two endpoint origins (screen space) and a dragged handle point P,
+    /// compute the fractional `curve` (bend height in CURVE_HEIGHT units) and `skew`
+    /// (apex offset along the chord, -1..1). Inverse of the forward conversion
+    /// `style.curve = options.curve * CURVE_HEIGHT * 2`. Math validated independently
+    /// against hand-computed ground truth before use (see Stage D design + tests).
+    static curve_and_skew_from_drag(A, B, P) {
+        const chord = B.sub(A);
+        const chord_len = chord.length();
+        if (chord_len < 1e-6) {
+            return { curve: 0, skew: 0 };
+        }
+        const dir = chord.div(chord_len);
+        // Normal is `dir` rotated 90° (CCW): (x, y) -> (-y, x).
+        const normal = new Point(-dir.y, dir.x);
+        const M = A.add(B).div(2);
+        const PM = P.sub(M);
+        const d = PM.x * normal.x + PM.y * normal.y;   // signed perpendicular distance
+        const s = PM.x * dir.x + PM.y * dir.y;          // signed along-chord offset
+        const curve = d / (CONSTANTS.CURVE_HEIGHT * 2);
+        const skew = Math.max(-1, Math.min(1, 2 * s / chord_len));
+        return { curve, skew };
     }
 
     /// Returns the vertex occupying (or nearest within half a cell of) `position`, or null.
@@ -3810,6 +3886,10 @@ class History {
                             continue;
                         }
                         curve.edge.options.curve = curve[to];
+                        // Restore skew too, if this action recorded it (drag-set curves).
+                        if (curve.skew_from !== undefined) {
+                            curve.edge.options.skew = curve[`skew_${to}`];
+                        }
                         cells.add(curve.edge);
                     }
                     update_panel = true;
@@ -7537,6 +7617,22 @@ class Cell {
                     ));
                     return;
                 }
+                // Alt + drag on an EDGE bends it into a curve (Stage D), rather than
+                // arming a higher-level arrow connection. Holding Alt enters Pan mode on
+                // keydown (before the click), so we must intercept from Pan as well as
+                // Default: pressing an edge with Alt held switches out of Pan into
+                // CurveDrag. Plain drag out of an edge (no Alt) still draws a next-level
+                // arrow; Alt+drag on the empty canvas still pans (that is the background
+                // handler, which this edge handler stops propagation to).
+                if (event.altKey && !this.is_vertex()
+                    && (ui.in_mode(UIMode.Default) || ui.in_mode(UIMode.Command)
+                        || ui.in_mode(UIMode.Pan))) {
+                    event.stopImmediatePropagation();
+                    event.preventDefault();
+                    ui.dismiss_pane();
+                    ui.switch_mode(new UIMode.CurveDrag(ui, this));
+                    return;
+                }
                 if (ui.in_mode(UIMode.Default) || ui.in_mode(UIMode.Command)) {
                     event.stopPropagation();
                     event.preventDefault();
@@ -7919,6 +8015,10 @@ export class Edge extends Cell {
             label_position: 50,
             offset: 0,
             curve: 0,
+            // Asymmetry of a bezier curve's apex along the chord (-1..1; 0 = symmetric).
+            // Set by drag-curving (Stage D). A default of 0 keeps existing diagrams and the
+            // delta encoder correct (skew is only encoded when it differs from 0).
+            skew: 0,
             radius: 3,
             angle: 0,
             shorten: { source: 0, target: 0 },
