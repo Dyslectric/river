@@ -16,8 +16,9 @@ test("ui.mjs is readable", () => {
 });
 
 test("KaTeX is imported via a path relative to import.meta.url (share-URL fix)", () => {
-    assert(/import\(new URL\("\.\/KaTeX\/katex\.mjs",\s*import\.meta\.url\)\.href\)/.test(src),
-        "KaTeX JS import must be relative to import.meta.url");
+    assert(/new URL\("\.\/KaTeX\/katex\.mjs",\s*import\.meta\.url\)\.href/.test(src),
+        "KaTeX JS URL is relative to import.meta.url");
+    assert(/import\(katex_js_url\)/.test(src), "KaTeX imported from the relative URL");
     assert(!/import\("\/KaTeX\/katex\.mjs"\)/.test(src),
         "the absolute /KaTeX/ import must be gone");
 });

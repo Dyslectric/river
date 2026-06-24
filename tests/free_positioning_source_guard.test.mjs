@@ -51,8 +51,11 @@ test("vertex_near can exclude the dragged selection", () => {
 });
 
 test("import collision check uses the spatial helper", () => {
-    assert(/ui\.has_vertex_at\(position\)/.test(quiver),
-        "quiver import uses ui.has_vertex_at");
+    // Paste/import rejects placement only on near-exact overlap (free positioning allows
+    // overlapping), via a tight-radius spatial query.
+    assert(/ui\.vertex_near\(position,\s*0\.01\)/.test(quiver)
+        || /ui\.has_vertex_at\(position\)/.test(quiver),
+        "quiver import uses a spatial occupancy check");
 });
 
 test("vertex move is gated behind Ctrl (Ctrl+Alt frees it)", () => {

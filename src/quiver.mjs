@@ -1368,7 +1368,12 @@ QuiverImportExport.base64 = new class extends QuiverImportExport {
                             if (!default_value.eq(value)) {
                                 delta[key] = value;
                             }
-                        } else if (typeof default_value === "object" && typeof value === "object") {
+                        } else if (typeof default_value === "object" && default_value !== null
+                            && typeof value === "object" && value !== null) {
+                            // Note: `typeof null === "object"`, so we must exclude null
+                            // explicitly — otherwise nested options whose values are null
+                            // (e.g. `endpoint_t: { source: null, target: null }`) cause
+                            // `Object.entries(null)` to throw, which broke copying any edge.
                             const subdelta = probe(value, default_value);
                             if (Object.keys(subdelta).length > 0) {
                                 delta[key] = subdelta;
@@ -1530,7 +1535,11 @@ QuiverImportExport.base64 = new class extends QuiverImportExport {
                     assert_kind(label_colour, "colour");
 
                     const position = origin.add(new Position(x, y));
-                    if (ui.has_vertex_at(position)) {
+                    // With free positioning, overlapping placement is allowed, so paste must
+                    // not be rejected merely for landing near an existing vertex (the spatial
+                    // has_vertex_at uses a half-cell radius). Only reject on near-exact
+                    // overlap, so a paste close to existing cells still succeeds.
+                    if (ui.vertex_near(position, 0.01) !== null) {
                         // If we cannot place every cell, we would prefer to add no cells, so we
                         // must remove any we have added so far.
                         indices.forEach((cell) => ui.remove_cell(cell, ui.history.present));

@@ -2562,17 +2562,38 @@ class UI {
                 if (this.clipboard === "") {
                     return;
                 }
+                // Paste at the cursor. As with "v"-create, a position denotes a cell's
+                // top-left but cells render centred, so shift the cursor offset up-and-left
+                // by half a cell so the pasted group centres under the pointer (rather than
+                // appearing low and to the right). Fall back to the focus position if the
+                // pointer hasn't moved yet.
+                let paste_position;
+                if (this.pointer_offset !== null) {
+                    const half = new Offset(
+                        this.cell_size(this.cell_width, 0) / 2,
+                        this.cell_size(this.cell_height, 0) / 2,
+                    );
+                    paste_position = this.position_from_offset(
+                        this.pointer_offset.sub(half), false,
+                    );
+                } else {
+                    paste_position = this.focus_position;
+                }
                 try {
                     const cells = new Set(QuiverImportExport.base64.import(
                         this,
                         this.clipboard,
-                        this.focus_position,
+                        paste_position,
                         false,
                     ));
+                    this.deselect();
+                    for (const cell of cells) {
+                        this.select(cell);
+                    }
                     this.history.add(this, [{ kind: "create", cells }]);
                 } catch (_) {
-                    const centre_offset = this.cell_centre_at_position(this.focus_position);
-                    const offset = this.offset_from_position(this.focus_position);
+                    const centre_offset = this.cell_centre_at_position(paste_position);
+                    const offset = this.offset_from_position(paste_position);
                     const paste_error = new DOM.Div({ class: "inline-error" }, {
                             left: `${offset.x + centre_offset.x}px`,
                             top: `${offset.y}px`,
@@ -8217,7 +8238,11 @@ export class Edge extends Cell {
             }
 
             for (const [key, value] of Object.entries(source)) {
-                if (typeof value === "object") {
+                // Note: `typeof null === "object"`. A null value must be assigned directly,
+                // not treated as a nested object to merge — otherwise null fields (e.g.
+                // `endpoint_t: { source: null }`) get replaced with `{}` on decode, which
+                // corrupts the option and breaks edge reconstruction on reload.
+                if (typeof value === "object" && value !== null) {
                     target[key] = target[key] || {};
                     deep_assign(target[key], value);
                 } else {
@@ -8333,7 +8358,7 @@ export class Edge extends Cell {
             }
         } else {
             for (const end of ["source", "target"]) {
-                const t = this.options.endpoint_t[end];
+                const t = (this.options.endpoint_t || {})[end];
                 // If this end attaches to another EDGE at a specific parameter t along it,
                 // attach there (Stage E). Otherwise fall back to the midpoint/phantom shape.
                 if (t !== null && t !== undefined && !this[end].is_vertex()
@@ -8707,25 +8732,31 @@ document.addEventListener("DOMContentLoaded", () => {
     // Use a path relative to this module (import.meta.url) rather than an absolute "/KaTeX/..."
     // path, so KaTeX resolves correctly when the app is opened at a share URL (which carries a
     // query string) or served from a sub-path, not just from the domain root.
-    KaTeX = import(new URL("./KaTeX/katex.mjs", import.meta.url).href).then((module) => {
+    const katex_js_url = new URL("./KaTeX/katex.mjs", import.meta.url).href;
+    const katex_css_url = new URL("./KaTeX/katex.css", import.meta.url).href;
+    KaTeX = import(katex_js_url).then((module) => {
         // KaTeX is fast enough to be worth waiting for, but not
         // immediately available. In this case, we delay loading
         // the quiver until the library has loaded.
         load_quiver_from_query_string();
         return module.default;
-    }).catch(() => {
-        // Handle KaTeX not loading (somewhat) gracefully.
-        UI.display_error("KaTeX failed to load.");
+    }).catch((error) => {
+        // Handle KaTeX not loading (somewhat) gracefully. Surface the URL we tried, so a
+        // misconfigured KaTeX path (e.g. missing `src/KaTeX/`) is diagnosable.
+        console.error(`KaTeX failed to load from: ${katex_js_url}`, error);
+        UI.display_error(`KaTeX failed to load (tried ${katex_js_url}).`);
         // Remove the loading screen.
         if (ui.settings.get("quiver.renderer") === "katex") {
             ui.element.query_selector(".loading-screen").class_list.add("hidden");
         }
     });
 
-    // Load the style sheet needed for KaTeX (relative to this module, as above).
+    // Load the style sheet needed for KaTeX (relative to this module, as above). The CSS
+    // references its fonts by a path relative to the CSS file (`fonts/...`), so the
+    // `KaTeX/fonts/` directory must sit beside `katex.css`.
     document.head.appendChild(new DOM.Element("link", {
         rel: "stylesheet",
-        href: new URL("./KaTeX/katex.css", import.meta.url).href,
+        href: katex_css_url,
     }).element);
 
     // Prevent clicking on the logo from having any effect other than opening the link.

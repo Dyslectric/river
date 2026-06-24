@@ -292,8 +292,9 @@ kbd {
 }
 
 .focus-point.focused {
-    border: var(--ui-focus) 4px solid;
-    border-radius: 8px;
+    /* The blue focus box has been removed in this fork: placement is free and objects are
+       created under the cursor with "v", so the keyboard focus box is unwanted. */
+    border: none;
 }
 
 .focus-point.smooth {
