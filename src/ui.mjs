@@ -1247,11 +1247,15 @@ class UI {
             // Hide the focus point if it is visible.
             this.focus_point.class_list.remove("revealed", "pending", "active");
 
-            // If the user is holding shift, then we zoom, otherwise we pan.
-            if (event.shiftKey) {
+            // If the user is holding shift, then we zoom; Ctrl also zooms, but more slowly
+            // for fine control. Otherwise we pan.
+            if (event.shiftKey || event.ctrlKey) {
+                // Ctrl zooms much more slowly than Shift (a quarter of the rate), for
+                // precise adjustments.
+                const zoom_divisor = event.ctrlKey && !event.shiftKey ? 400 : 100;
                 this.pan_to(this.view, clamp(
                     CONSTANTS.MIN_ZOOM,
-                    this.scale - event.deltaY / 100,
+                    this.scale - event.deltaY / zoom_divisor,
                     CONSTANTS.MAX_ZOOM,
                 ));
                 this.toolbar.update(this);
